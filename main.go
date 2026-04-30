@@ -1,42 +1,71 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
 	"os"
-	"strings"
+
+	"github.com/chiagxziem/needle/internal/search"
 )
 
 func main() {
+	// define flags
+	ignoreCase := flag.Bool("i", false, "ignore case distinctions in patterns")
+	showLineNumbers := flag.Bool("n", false, "print line number with output lines")
+	printCountPerFIle := flag.Bool("c", false, "print only a count of matching lines per file")
+	printFilesWithMatches := flag.Bool("l", false, "print only filenames with matches")
+	// parse the command line into the defined flags
+	flag.Parse()
+
 	// accept positional args
-	if len(os.Args) < 3 {
+	if len(flag.Args()) < 2 {
 		fmt.Fprintln(os.Stderr, "Need two parameters: pattern and file path")
 		os.Exit(1)
 	}
-
 	// extract args pattern and file path
-	pattern, path := os.Args[1], os.Args[2]
+	pattern, path := flag.Arg(0), flag.Arg(1)
 
-	// open file from file path and handle error
-	file, err := os.Open(path)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	// define opts from flags
+	opts := search.Options{
+		IgnoreCase:            *ignoreCase,
+		ShowLineNumbers:       *showLineNumbers,
+		PrintCountPerFile:     *printCountPerFIle,
+		PrintFilesWithMatches: *printFilesWithMatches,
 	}
 
-	lineNumber := 0
-
-	// scan the file, and return the lines that match the pattern
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lineNumber++
-		if strings.Contains(scanner.Text(), pattern) {
-			fmt.Println(lineNumber, scanner.Text())
+	if opts.PrintFilesWithMatches {
+		fileHasMatch, err := search.SearchFileForMatches(path, pattern, opts)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
-	}
-  // return err if an error occurs
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "scanning file", err)
-		os.Exit(1)
+
+		if fileHasMatch {
+			fmt.Println(path)
+		}
+	} else if opts.PrintCountPerFile {
+		output, err := search.SearchFileForMatchCount(path, pattern, opts)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		fmt.Println(output)
+	} else {
+		matches, err := search.SearchFile(path, pattern, opts)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		// if there are no matches (and no errors) exit program
+		if len(matches) == 0 {
+			os.Exit(1)
+		}
+
+		// print matches to os.Stdout
+		for _, m := range matches {
+			fmt.Println(m.Format(opts.ShowLineNumbers))
+		}
 	}
 }
