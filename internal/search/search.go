@@ -18,6 +18,9 @@ type Options struct {
 	PrintFilesWithMatches bool
 	UseFixedStrings       bool
 	RecursiveSearch       bool
+	Include               string
+	Exclude               string
+	ExcludeDir            string
 }
 
 type Match struct {
@@ -112,7 +115,42 @@ func Search(r io.Reader, path, pattern string, opts Options) (Result, error) {
 	}, nil
 }
 
+func fileMatchesFilters(name string, opts Options) (bool, error) {
+	// if --include is set, skip files that don't match the glob
+	if opts.Include != "" {
+		matched, err := filepath.Match(opts.Include, name)
+		if err != nil {
+			return false, err
+		}
+		if !matched {
+			return false, nil
+		}
+	}
+
+	// if --exclude is set, skip files that match the glob
+	if opts.Exclude != "" {
+		matched, err := filepath.Match(opts.Exclude, name)
+		if err != nil {
+			return false, err
+		}
+		if matched {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
 func SearchFile(path, pattern string, opts Options) (Result, error) {
+	// ensure path matches include/exclude filters if given
+	ok, err := fileMatchesFilters(filepath.Base(path), opts)
+	if err != nil {
+		return Result{}, err
+	}
+	if !ok {
+		return Result{}, nil
+	}
+
 	// open file from file path and handle error
 	file, err := os.Open(path)
 	if err != nil {
@@ -148,12 +186,35 @@ func SearchDir(root, pattern string, opts Options) ([]Result, error) {
 			return err
 		}
 
-		// skip hidden dirs
-		if d.IsDir() && d.Name() != "." && d.Name()[0] == '.' {
-			return filepath.SkipDir
+		// dirs to skip
+		if d.IsDir() && d.Name() != "." {
+			// skip hidden dirs
+			if d.Name()[0] == '.' {
+				return filepath.SkipDir
+			}
+
+			// skip excluded dirs when --exclude-dir is set
+			if opts.ExcludeDir != "" {
+				matched, err := filepath.Match(opts.ExcludeDir, d.Name())
+				if err != nil {
+					return err
+				}
+				if matched {
+					return filepath.SkipDir
+				}
+			}
 		}
 
 		if !d.IsDir() {
+			// ensure path matches include/exclude filters if given
+			ok, err := fileMatchesFilters(d.Name(), opts)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+
 			result, err := SearchFile(path, pattern, opts)
 			if err != nil {
 				// skip unreadable files, don't abort the whole walk

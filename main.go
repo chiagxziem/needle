@@ -16,6 +16,9 @@ func main() {
 	printFilesWithMatches := pflag.BoolP("files-with-matches", "l", false, "print only names of files with matches")
 	recursiveSearch := pflag.BoolP("recursive", "r", false, "search files & directories recursively")
 	useFixedStrings := pflag.BoolP("fixed-strings", "F", false, "use patterns as strings instead of regular expressions")
+	include := pflag.String("include", "", "search only files matching glob e.g. '*.go'")
+	exclude := pflag.String("exclude", "", "skip files that match glob e.g. '*.go'")
+	excludeDir := pflag.String("exclude-dir", "", "skip directories matching glob e.g. 'vendor'")
 
 	// parse the command line into the defined flags
 	pflag.Parse()
@@ -38,6 +41,9 @@ func main() {
 		PrintFilesWithMatches: *printFilesWithMatches,
 		UseFixedStrings:       *useFixedStrings,
 		RecursiveSearch:       *recursiveSearch,
+		Include:               *include,
+		Exclude:               *exclude,
+		ExcludeDir:            *excludeDir,
 	}
 
 	hasAnyMatch := false
