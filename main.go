@@ -3,9 +3,17 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 
 	"github.com/chiagxziem/needle/internal/search"
+	"github.com/fatih/color"
 	"github.com/spf13/pflag"
+)
+
+var (
+	magenta = color.New(color.FgMagenta).SprintFunc()
+	green   = color.New(color.FgGreen).SprintFunc()
+	red     = color.New(color.FgRed, color.Bold).SprintFunc()
 )
 
 func main() {
@@ -82,14 +90,36 @@ func main() {
 
 	// Stdin mode
 	if len(paths) == 0 {
-		hasMatch, err := search.SearchStdin(pattern, opts)
+		formatter := search.Formatter{
+			Highlight: func(s string) string { return red(s) },
+			LineNum:   func(s string) string { return green(s) },
+			Sep:       func(s string) string { return magenta(s) },
+		}
+
+		result, err := search.SearchStdin(pattern, opts, func(m search.Match, r *regexp.Regexp) bool {
+			// handle -l immediately is passed
+			if opts.PrintFilesWithMatches {
+				fmt.Println(magenta("(standard input)"))
+				return false
+			}
+			// if there's no -c, handle normally
+			if !opts.PrintCountPerFile {
+				fmt.Println(m.Format(r, formatter, opts.ShowLineNumbers))
+			}
+			return true
+		})
 
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		if !hasMatch {
+		if !result.HasMatch {
 			os.Exit(1)
+		}
+
+		// handle -c after all input is read
+		if opts.PrintCountPerFile && !opts.PrintFilesWithMatches {
+			fmt.Println(result.Count)
 		}
 
 		return
@@ -120,22 +150,28 @@ func main() {
 }
 
 func getOutput(r search.Result, opts search.Options, multipleFiles bool) {
+	formatter := search.Formatter{
+		Highlight: func(s string) string { return red(s) },
+		LineNum:   func(s string) string { return green(s) },
+		Sep:       func(s string) string { return magenta(s) },
+	}
+
 	if opts.PrintFilesWithMatches {
 		if r.HasMatch {
-			fmt.Println(r.Path)
+			fmt.Println(magenta(r.Path))
 		}
 	} else if opts.PrintCountPerFile {
 		if multipleFiles {
-			fmt.Printf("%s:%d\n", r.Path, r.Count)
+			fmt.Printf("%s:%d\n", magenta(r.Path), r.Count)
 		} else {
 			fmt.Println(r.Count)
 		}
 	} else {
 		for _, m := range r.Matches {
 			if multipleFiles {
-				fmt.Printf("%s:%s\n", r.Path, m.Format(opts.ShowLineNumbers))
+				fmt.Printf("%s%s%s\n", magenta(r.Path), magenta(":"), m.Format(r.RegexpPattern, formatter, opts.ShowLineNumbers))
 			} else {
-				fmt.Println(m.Format(opts.ShowLineNumbers))
+				fmt.Println(m.Format(r.RegexpPattern, formatter, opts.ShowLineNumbers))
 			}
 		}
 	}

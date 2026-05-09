@@ -28,18 +28,27 @@ type Match struct {
 	Line       string
 }
 
-func (m Match) Format(showLineNumbers bool) string {
+type Formatter struct {
+	Highlight func(string) string
+	LineNum   func(string) string
+	Sep       func(string) string
+}
+
+func (m Match) Format(re *regexp.Regexp, f Formatter, showLineNumbers bool) string {
+	highlighted := re.ReplaceAllStringFunc(m.Line, f.Highlight)
 	if showLineNumbers {
-		return fmt.Sprintf("%d: %s", m.LineNumber, m.Line)
+		lineNum := fmt.Sprintf("%d", m.LineNumber)
+		return fmt.Sprintf("%s%s%s", f.LineNum(lineNum), f.Sep(":"), highlighted)
 	}
-	return m.Line
+	return highlighted
 }
 
 type Result struct {
-	Path     string
-	Matches  []Match
-	Count    int
-	HasMatch bool
+	Path          string
+	Matches       []Match
+	Count         int
+	HasMatch      bool
+	RegexpPattern *regexp.Regexp
 }
 
 func compilePattern(pattern string, opts Options) (*regexp.Regexp, error) {
@@ -55,28 +64,36 @@ func compilePattern(pattern string, opts Options) (*regexp.Regexp, error) {
 	return regexp.Compile(pattern)
 }
 
-func SearchStdin(pattern string, opts Options) (bool, error) {
+func SearchStdin(pattern string, opts Options, onMatch func(Match, *regexp.Regexp) bool) (Result, error) {
 	// get regexp object from pattern and opts
 	re, err := compilePattern(pattern, opts)
 	if err != nil {
-		return false, fmt.Errorf("invalid pattern: %w", err)
+		return Result{}, fmt.Errorf("invalid pattern: %w", err)
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	lineNumber := 0
-	hasMatch := false
+	var matches []Match
 
 	for scanner.Scan() {
 		lineNumber++
 		line := scanner.Text()
 
 		if re.MatchString(line) {
-			hasMatch = true
-			fmt.Println(Match{lineNumber, line}.Format(opts.ShowLineNumbers))
+			m := Match{lineNumber, line}
+			matches = append(matches, m)
+			if !onMatch(m, re) {
+				break
+			}
 		}
 	}
 
-	return hasMatch, scanner.Err()
+	return Result{
+		Matches:       matches,
+		Count:         len(matches),
+		HasMatch:      len(matches) > 0,
+		RegexpPattern: re,
+	}, scanner.Err()
 }
 
 func Search(r io.Reader, path, pattern string, opts Options) (Result, error) {
@@ -108,10 +125,11 @@ func Search(r io.Reader, path, pattern string, opts Options) (Result, error) {
 	}
 
 	return Result{
-		Path:     path,
-		Matches:  matches,
-		Count:    len(matches),
-		HasMatch: len(matches) > 0,
+		Path:          path,
+		Matches:       matches,
+		Count:         len(matches),
+		HasMatch:      len(matches) > 0,
+		RegexpPattern: re,
 	}, nil
 }
 
@@ -206,15 +224,6 @@ func SearchDir(root, pattern string, opts Options) ([]Result, error) {
 		}
 
 		if !d.IsDir() {
-			// ensure path matches include/exclude filters if given
-			ok, err := fileMatchesFilters(d.Name(), opts)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
-
 			result, err := SearchFile(path, pattern, opts)
 			if err != nil {
 				// skip unreadable files, don't abort the whole walk
